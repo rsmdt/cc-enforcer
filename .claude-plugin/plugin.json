@@ -1,0 +1,6 @@
+{
+  "name": "cc-enforcer",
+  "version": "0.1.0",
+  "description": "Enforces Hookify rule files through Claude Code mods",
+  "author": { "name": "Rudolf Schmidt" }
+}
