@@ -1,0 +1,11 @@
+{
+  "name": "cc-enforcer",
+  "owner": { "name": "Rudolf Schmidt" },
+  "plugins": [
+    {
+      "name": "cc-enforcer",
+      "source": "./",
+      "description": "Enforces Hookify rule files through Claude Code mods"
+    }
+  ]
+}
