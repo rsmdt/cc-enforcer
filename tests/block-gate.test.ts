@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { stubMods } from './fake-io.ts'
+import { ruleEvents, sessionLogPath, stubMods } from './fake-io.ts'
 
 const forcePush = '---\nname: no-force-push\nevent: bash\naction: block\npattern: git push .*--force\n---\nNever force-push. Push to a new branch and open a pull request.\n'
 const envWrites = '---\nevent: file\naction: block\nconditions:\n  - field: file_path\n    operator: ends_with\n    pattern: .env\n---\nKeep secrets out of .env files; use the vault.\n'
@@ -15,8 +15,7 @@ const repo = {
 }
 
 function logLines(writes: Map<string, string>) {
-  const text = writes.get('/home/u/.cc-enforcer/logs/session-1.jsonl') ?? ''
-  return text.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  return ruleEvents(writes, '/repo/packages/app')
 }
 
 async function settled() {
@@ -56,7 +55,7 @@ test('a non-matching call runs unaffected', async ($, on) => {
   expect(logLines(mods.writes)).toEqual([])
 })
 
-test('a personal file rule blocks a Write and the log keeps the path but no content or command', async ($, on) => {
+test('a personal file rule blocks a Write and the session log keeps the path, the content and the command', async ($, on) => {
   const mods = stubMods(on, repo)
   const result = await $.tool.call({ tool: 'Write', file_path: '/repo/.env', content: 'API_KEY=secret-value' })
   expect(result.deny).toBe('[cc-enforcer:personal:no-env-writes] Keep secrets out of .env files; use the vault.')
@@ -68,8 +67,8 @@ test('a personal file rule blocks a Write and the log keeps the path but no cont
     ['block', 'project:no-force-push', 'Bash', undefined, 'main session'],
   ])
   const written = [...mods.writes.values()].join('\n')
-  expect(written).not.toContain('secret-value')
-  expect(written).not.toContain('git push')
+  expect(written).toContain('secret-value')
+  expect(written).toContain('git push --force')
 })
 
 test('the session log is made owner-only before anything is written to it, and only once', async ($, on) => {
@@ -77,12 +76,13 @@ test('the session log is made owner-only before anything is written to it, and o
   await $.tool.call({ tool: 'Bash', command: 'git push --force' })
   await $.tool.call({ tool: 'Bash', command: 'git push -f --force' })
   await settled()
-  const log = '/home/u/.cc-enforcer/logs/session-1.jsonl'
-  expect(mods.logFileSteps).toEqual([
-    `run sh -c umask 077 && mkdir -p "$1" && chmod 700 "$2" "$1" && : >> "$3" && chmod 600 "$3" sh /home/u/.cc-enforcer/logs /home/u/.cc-enforcer ${log}`,
-    `write ${log}`,
-    `write ${log}`,
-  ])
+  const log = sessionLogPath('/repo/packages/app')
+  const steps = mods.logFileSteps.filter((step) => step.includes('.cc-enforcer'))
+  expect(steps[0]).toBe(
+    `run sh -c umask 077 && mkdir -p "$1" && chmod 700 "$2" "$3" "$1" && : >> "$4" && chmod 600 "$4" sh /home/u/.cc-enforcer/projects/-repo-packages-app /home/u/.cc-enforcer /home/u/.cc-enforcer/projects ${log}`,
+  )
+  expect(steps.slice(1).every((step) => step === `write ${log}`)).toBe(true)
+  expect(steps.filter((step) => step.startsWith('run'))).toHaveLength(1)
 })
 
 test('when the log cannot be made owner-only it is still written', async ($, on) => {
@@ -122,7 +122,7 @@ test('if the enforcer fails before deciding, the call does not run', async ($, o
   expect(result.deny).toBe('[cc-enforcer] the check could not finish, so this was not run')
   expect(mods.toolCalls).toEqual([])
   await settled()
-  expect(logLines(mods.writes).map((line) => [line.kind, line.tool, line.agentLabel])).toEqual([['check-failed', 'Bash', 'main session']])
+  expect(ruleEvents(mods.writes, 'unknown-project').map((line) => [line.kind, line.tool, line.agentLabel])).toEqual([['check-failed', 'Bash', 'main session']])
 })
 
 test('a block rule whose plain-language check cannot be answered stops the call and names the rule', async ($, on) => {

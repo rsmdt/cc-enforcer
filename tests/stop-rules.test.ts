@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { stubMods } from './fake-io.ts'
+import { sessionLogPath, stubMods } from './fake-io.ts'
 
 const unfinished = '---\nname: finish-the-tests\nevent: stop\naction: block\npattern: TODO run tests\n---\nRun the test suite before you stop.\n'
 const summary = '---\nname: summarize\nevent: stop\naction: warn\npattern: refactored\n---\nAsk Claude for a summary of the refactor.\n'
@@ -124,7 +124,7 @@ test('a stop check that fails lets the turn end and tells the user the check fai
   expect(mods.stops).toEqual(['main session'])
   expect(mods.userLines.join('\n')).toContain('check could not finish')
   await settled()
-  const log = mods.writes.get('/home/u/.cc-enforcer/logs/session-1.jsonl') ?? ''
+  const log = mods.writes.get(sessionLogPath('/repo')) ?? ''
   expect(log).toContain('"kind":"check-failed"')
   expect(log).toContain('"event":"stop"')
 })

@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { stubMods } from './fake-io.ts'
+import { ruleEvents, sessionLog, stubMods } from './fake-io.ts'
 
 const secrets = '---\nname: no-secrets\nevent: prompt\naction: block\npattern: password\\s*=\n---\nDo not paste passwords. Reference the secret by its vault name instead.\n'
 const deploy = '---\nname: deploy-checklist\nevent: prompt\naction: warn\npattern: deploy\n---\nFollow the deploy checklist in docs/deploy.md.\n'
@@ -134,10 +134,8 @@ test('a failed warn check on a prompt is logged as a check failure for that rule
   const mods = stubMods(on, setup({ scope: evaluatorRule('warn') }))
   await submit($, 'rewrite everything')
   await new Promise((resolve) => setTimeout(resolve, 0))
-  const log = mods.writes.get('/home/u/.cc-enforcer/logs/session-1.jsonl') ?? ''
-  const lines = log.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  const lines = ruleEvents(mods.writes)
   expect(lines.map((line) => [line.kind, line.event, line.ruleId])).toEqual([['check-failed', 'prompt', 'project:scope']])
-  expect(log).not.toContain('rewrite everything')
 })
 
 test('if the enforcer fails before any rule is in flight, the prompt is sent and the user is told', async ($, on) => {
@@ -176,12 +174,11 @@ test('a bash rule does not apply to prompts', async ($, on) => {
   expect(mods.prompts.map((prompt) => prompt.text)).toEqual(['rm -rf build'])
 })
 
-test('a dropped prompt is logged by rule and outcome without the prompt text', async ($, on) => {
+test('a dropped prompt is logged by rule and outcome, and the prompt itself with its text', async ($, on) => {
   const mods = stubMods(on, setup({ secrets }))
   await submit($, 'password = hunter2')
   await new Promise((resolve) => setTimeout(resolve, 0))
-  const log = mods.writes.get('/home/u/.cc-enforcer/logs/session-1.jsonl') ?? ''
-  const lines = log.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  const lines = ruleEvents(mods.writes)
   expect(lines.map((line) => [line.kind, line.event, line.ruleId])).toEqual([['block', 'prompt', 'project:no-secrets']])
-  expect(log).not.toContain('hunter2')
+  expect(sessionLog(mods.writes).find((line) => line.kind === 'prompt')).toMatchObject({ text: 'password = hunter2', outcome: 'block', ruleIds: ['project:no-secrets'] })
 })

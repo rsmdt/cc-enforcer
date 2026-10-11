@@ -28,6 +28,10 @@ export function select(rules: readonly Rule[], point: CheckPoint, input: CheckIn
   return { decided, pending }
 }
 
+export function coveringRules(rules: readonly Rule[], input: CheckInput): string[] {
+  return rules.filter((rule) => ruleCovers(rule, input)).map((rule) => rule.id)
+}
+
 export function resolve(selection: Selection, verdicts: ReadonlyMap<string, Verdict>): Resolution {
   const applying = [...selection.decided]
   const failures: Rule[] = []

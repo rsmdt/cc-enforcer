@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { stubMods } from './fake-io.ts'
+import { ruleEvents, stubMods } from './fake-io.ts'
 
 const confirmPush = '---\nname: confirm-push\nevent: bash\naction: ask\npattern: git push\n---\nPushing shares your work; check the branch first.\n'
 const forcePush = '---\nname: no-force-push\nevent: bash\naction: block\npattern: --force\n---\nNever force-push.\n'
@@ -13,8 +13,7 @@ function setup(rules: Record<string, string>, answerAsk?: (question: string, lab
 }
 
 function logLines(writes: Map<string, string>) {
-  const text = writes.get('/home/u/.cc-enforcer/logs/session-1.jsonl') ?? ''
-  return text.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  return ruleEvents(writes, '/repo')
 }
 
 async function settled() {

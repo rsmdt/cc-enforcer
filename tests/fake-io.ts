@@ -32,7 +32,7 @@ export function fakeGit(fs: ReturnType<typeof virtualFs>, mode: FakeGit, args: s
   return { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository (or any of the parent directories): .git\n' }
 }
 
-export function virtualFs(files: Record<string, string>, dirs: string[], unlistable: string[] = []) {
+export function virtualFs(files: Record<string, string>, dirs: string[], unlistable: string[] = [], mtimes: Record<string, number> = {}) {
   const directories = new Set<string>()
   const addParents = (path: string) => {
     for (let dir = parentOf(path); dir !== undefined; dir = parentOf(dir)) directories.add(dir)
@@ -61,7 +61,7 @@ export function virtualFs(files: Record<string, string>, dirs: string[], unlista
       return [...names].sort(([a], [b]) => (a < b ? -1 : 1)).map(([name, kind]) => ({ name, kind, size: kind === 'file' ? files[prefix + name].length : 0, isLink: false }))
     },
     stat(path: string) {
-      if (path in files) return { kind: 'file', size: files[path].length, mtimeMs: 1, isLink: false }
+      if (path in files) return { kind: 'file', size: files[path].length, mtimeMs: mtimes[path] ?? 1, isLink: false }
       addFileParents()
       if (directories.has(path)) return { kind: 'dir', size: 0, mtimeMs: 1, isLink: false }
       throw new Error('ENOENT: ' + path)
@@ -102,13 +102,34 @@ export type ModSetup = {
   surfaces?: string[]
   complete?: (request: ReviewRequest) => Promise<unknown>
   promptDraft?: string
+  mtimes?: Record<string, number>
 }
 
 export type ReviewRequest = { model: string; system?: string; prompt: string; maxTokens?: number; timeoutMs?: number }
 
+const ENFORCEMENT_TRAIL: readonly string[] = ['activity', 'prompt', 'turn-end']
+
+export function sessionLogPath(cwd: string, sessionId = 'session-1', home = '/home/u'): string {
+  return `${home}/.cc-enforcer/projects/${cwd.replace(/[^A-Za-z0-9]/g, '-')}/${sessionId}.jsonl`
+}
+
+export function sessionLog(writes: Map<string, string>, cwd = '/repo'): any[] {
+  return (writes.get(sessionLogPath(cwd)) ?? '').split('\n').filter(Boolean).map((line) => JSON.parse(line))
+}
+
+export function ruleEvents(writes: Map<string, string>, cwd = '/repo'): any[] {
+  return sessionLog(writes, cwd).filter((line) => !ENFORCEMENT_TRAIL.includes(line.kind))
+}
+
+const stubWritten = new WeakMap<Record<string, string>, Set<string>>()
+
 export function stubMods(on: StubRegistrar, setup: ModSetup) {
+  const earlierWrites = stubWritten.get(setup.files) ?? new Set<string>()
+  for (const path of earlierWrites) delete setup.files[path]
+  earlierWrites.clear()
+  stubWritten.set(setup.files, earlierWrites)
   const home = setup.home ?? '/home/u'
-  const fs = virtualFs(setup.files, setup.dirs ?? [])
+  const fs = virtualFs(setup.files, setup.dirs ?? [], [], setup.mtimes ?? {})
   const writes = new Map<string, string>()
   const userLines: string[] = []
   const toolCalls: string[] = []
@@ -120,6 +141,9 @@ export function stubMods(on: StubRegistrar, setup: ModSetup) {
   const prompts: Array<{ text: string; context?: string[] }> = []
   const completions: ReviewRequest[] = []
   const fills: Array<{ text: string; mode?: string }> = []
+  const panes: Array<{ id: string; title: string; columns?: number }> = []
+  const statuses: Array<string | undefined> = []
+  const rendered: Array<{ component: string; props: any }> = []
   const failing = new Set(setup.failing ?? [])
   const answer = (name: string, value: () => unknown) => {
     if (failing.has(name)) return { deny: name + ' failed' }
@@ -149,6 +173,7 @@ export function stubMods(on: StubRegistrar, setup: ModSetup) {
       logFileSteps.push(`write ${e.path}`)
       writes.set(e.path, e.text)
       setup.files[e.path] = e.text
+      earlierWrites.add(e.path)
       return undefined
     }),
   )
@@ -177,7 +202,10 @@ export function stubMods(on: StubRegistrar, setup: ModSetup) {
     return { isFilled: true }
   })
   on('turn.complete', ($: unknown, e: { answer: string }) => ({ text: e.answer }))
-  on('ui.render', ($: any, e: unknown) => h($.ui.resolve(e).Box, { key: 'engine-band' }))
+  on('ui.render', ($: any, e: { component: string; props: unknown }) => {
+    rendered.push({ component: e.component, props: e.props })
+    return h($.ui.resolve(e).Box, { key: 'engine-band' })
+  })
   on('agent.list', () => answer('agent.list', () => setup.agents ?? []))
   on('settings.read', () => answer('settings.read', () => setup.settings ?? {}))
   on('command.register', ($: unknown, e: { name: string }) =>
@@ -188,6 +216,10 @@ export function stubMods(on: StubRegistrar, setup: ModSetup) {
   )
   on('ui.log', ($: unknown, e: { text: string }) => answer('ui.log', () => void userLines.push(e.text)))
   on('ui.toast', ($: unknown, e: { text: string }) => answer('ui.toast', () => void userLines.push(e.text)))
+  on('ui.open', ($: unknown, e: { id: string; title?: string; columns?: number }) => answer('ui.open', () => void (panes.some((pane) => pane.id === e.id) || panes.push({ id: e.id, title: e.title ?? e.id, columns: e.columns }))))
+  on('ui.status', ($: unknown, e: { text: string | undefined }) => answer('ui.status', () => void statuses.push(e.text)))
+  on('ui.close', ($: unknown, e: { id: string }) => answer('ui.close', () => void panes.splice(0, panes.length, ...panes.filter((pane) => pane.id !== e.id))))
+  on('ui.panes', () => answer('ui.panes', () => [...panes]))
   on('session.start', () => ({ cwd: setup.cwd }))
   on('prompt.submit', ($: unknown, e: { text: string; context?: string[] }) => {
     prompts.push({ text: e.text, context: e.context })
@@ -218,5 +250,5 @@ export function stubMods(on: StubRegistrar, setup: ModSetup) {
       return { deny: (error as Error).message }
     }
   }
-  return { writes, userLines, toolCalls, logFileSteps, stops, classified, commands, asked, prompts, completions, fills }
+  return { writes, userLines, toolCalls, logFileSteps, stops, classified, commands, asked, prompts, completions, fills, panes, rendered, statuses }
 }

@@ -3,6 +3,7 @@ import type { Overview, ToggleOutcome } from './sources/index.ts'
 
 export const OVERVIEW_COMMAND = 'cc-enforcer-rules'
 export const TOGGLE_COMMAND = 'cc-enforcer-toggle'
+export const AUDIT_COMMAND = 'cc-enforcer-audit'
 export const TOGGLE_USAGE = '<name> on|off [project|personal]'
 
 export const MODS_OFF_GUIDANCE =

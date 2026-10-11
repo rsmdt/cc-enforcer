@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import { review, REVIEW_FINDING_LIMIT, type ReviewIo } from '../src/evaluator/index.ts'
 import { compileRule, parseRuleFile, select } from '../src/rules/index.ts'
-import { stubMods, type ModSetup, type ReviewRequest } from './fake-io.ts'
+import { type ModSetup, type ReviewRequest, ruleEvents, stubMods } from './fake-io.ts'
 
 const reviewedRm = '---\nname: reviewed-rm\nevent: bash\naction: warn\nconditions:\n  - field: command\n    operator: contains\n    pattern: rm\n  - field: command\n    operator: llm_evaluate\n    pattern: Does this delete source files?\n---\nKeep source files.\n'
 const reviewedLogger = '---\nname: reviewed-logger\nevent: file\naction: warn\nconditions:\n  - field: new_text\n    operator: llm_evaluate\n    pattern: Does this log with console instead of the logger?\n---\nUse the project logger.\n'
@@ -41,8 +41,7 @@ function band($) {
 }
 
 function logLines(writes: Map<string, string>) {
-  const text = writes.get('/home/u/.cc-enforcer/logs/session-1.jsonl') ?? ''
-  return text.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  return ruleEvents(writes, '/repo')
 }
 
 async function settled() {
@@ -63,7 +62,7 @@ test('at turn end the queued call is reviewed against the warn rule and the find
   expect(logLines(mods.writes).map((line) => [line.kind, line.ruleId, line.tool, line.agentLabel, line.toolUseId])).toEqual([
     ['review-finding', 'project:reviewed-rm', 'Bash', 'main session', 'tu-1'],
   ])
-  expect([...mods.writes.values()].join('\n')).not.toContain('rm src/a.ts')
+  expect([...mods.writes.values()].join('\n')).toContain('rm src/a.ts')
 })
 
 test('a turn with no queued call makes no review', async ($, on) => {

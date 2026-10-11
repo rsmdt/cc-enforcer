@@ -1,6 +1,18 @@
 import type { Rejection } from './sources/index.ts'
 
-export type RecordedKind = 'block' | 'warn' | 'loop-guard-override' | 'finding' | 'review-finding' | 'review-failed' | 'not-reviewed' | 'check-failed' | 'rule-rejected'
+export type RecordedKind =
+  | 'block'
+  | 'warn'
+  | 'loop-guard-override'
+  | 'finding'
+  | 'review-finding'
+  | 'review-failed'
+  | 'not-reviewed'
+  | 'check-failed'
+  | 'rule-rejected'
+  | 'activity'
+  | 'prompt'
+  | 'turn-end'
 
 export type RecordedEvent = {
   kind: RecordedKind
@@ -15,12 +27,27 @@ export type RecordedEvent = {
   path?: string
   problem?: string
   count?: number
+  id?: string
+  queue?: string
+  agentId?: string
+  operation?: string
+  input?: Record<string, unknown>
+  status?: string
+  reason?: string
+  covering?: string[]
+  matched?: string[]
+  started?: string
+  text?: string
+  outcome?: string
+  ruleIds?: string[]
   time: string
 }
 
 export type RecorderIo = {
   home(): Promise<string>
   sessionId(): Promise<string>
+  cwd(): Promise<string>
+  read(path: string): Promise<string>
   write(path: string, text: string): Promise<void>
   run(argv: string[]): Promise<unknown>
   showUser(text: string): void
@@ -28,7 +55,19 @@ export type RecorderIo = {
 
 const FILE_TOOLS = ['Edit', 'Write', 'MultiEdit']
 
-const MAKE_OWNER_ONLY_LOG = 'umask 077 && mkdir -p "$1" && chmod 700 "$2" "$1" && : >> "$3" && chmod 600 "$3"'
+const MAKE_OWNER_ONLY_LOG = 'umask 077 && mkdir -p "$1" && chmod 700 "$2" "$3" "$1" && : >> "$4" && chmod 600 "$4"'
+
+const UNKNOWN_PROJECT = 'unknown-project'
+
+type LogLocation = { base: string; projects: string; folder: string; path: string }
+
+export function projectFolderName(cwd: string): string {
+  return cwd.replace(/[^A-Za-z0-9]/g, '-')
+}
+
+export function logRoot(home: string): string {
+  return `${home}/.cc-enforcer`
+}
 
 export const MAIN_SESSION_LABEL = 'main session'
 export const WORKFLOW_AGENT_LABEL = 'workflow agent'
@@ -52,30 +91,74 @@ export function createRecorder() {
   const hitCounts = new Map<string, number>()
   const ownerOnlyLogs = new Set<string>()
   let writing: Promise<void> = Promise.resolve()
+  let location: Promise<LogLocation> | undefined
+  let earlier: Promise<{ text: string; events: RecordedEvent[] }> | undefined
 
-  async function makeOwnerOnly(io: RecorderIo, home: string, logPath: string): Promise<void> {
-    if (ownerOnlyLogs.has(logPath)) return
-    ownerOnlyLogs.add(logPath)
-    const baseFolder = `${home}/.cc-enforcer`
-    const logFolder = `${baseFolder}/logs`
-    await io.run(['sh', '-c', MAKE_OWNER_ONLY_LOG, 'sh', logFolder, baseFolder, logPath]).catch(() => undefined)
+  function countHit(event: RecordedEvent): void {
+    if (event.ruleId !== undefined && !NOT_A_HIT.includes(event.kind)) hitCounts.set(event.ruleId, (hitCounts.get(event.ruleId) ?? 0) + 1)
+  }
+
+  function locate(io: RecorderIo): Promise<LogLocation> {
+    location ??= (async () => {
+      const [home, sessionId, cwd] = await Promise.all([io.home(), io.sessionId(), io.cwd().catch(() => UNKNOWN_PROJECT)])
+      const base = logRoot(home)
+      const projects = `${base}/projects`
+      const folder = `${projects}/${projectFolderName(cwd)}`
+      return { base, projects, folder, path: `${folder}/${sessionId}.jsonl` }
+    })().catch((error) => {
+      location = undefined
+      throw error
+    })
+    return location
+  }
+
+  function loadEarlier(io: RecorderIo): Promise<{ text: string; events: RecordedEvent[] }> {
+    earlier ??= (async () => {
+      const { path } = await locate(io)
+      const read = await io.read(path).catch(() => '')
+      const text = read === '' || read.endsWith('\n') ? read : `${read}\n`
+      const events = text.split('\n').flatMap((line) => {
+        try {
+          return line === '' ? [] : [JSON.parse(line) as RecordedEvent]
+        } catch {
+          return []
+        }
+      })
+      for (const event of events) countHit(event)
+      return { text, events }
+    })().catch((error) => {
+      earlier = undefined
+      throw error
+    })
+    return earlier
+  }
+
+  async function makeOwnerOnly(io: RecorderIo, { base, projects, folder, path }: LogLocation): Promise<void> {
+    if (ownerOnlyLogs.has(path)) return
+    ownerOnlyLogs.add(path)
+    await io.run(['sh', '-c', MAKE_OWNER_ONLY_LOG, 'sh', folder, base, projects, path]).catch(() => undefined)
   }
 
   function append(io: RecorderIo, event: RecordedEvent): void {
-    if (event.ruleId !== undefined && !NOT_A_HIT.includes(event.kind)) hitCounts.set(event.ruleId, (hitCounts.get(event.ruleId) ?? 0) + 1)
+    countHit(event)
     lines.push(JSON.stringify(event))
-    const snapshot = lines.join('\n') + '\n'
     writing = writing
       .then(async () => {
-        const [home, sessionId] = await Promise.all([io.home(), io.sessionId()])
-        const logPath = `${home}/.cc-enforcer/logs/${sessionId}.jsonl`
-        await makeOwnerOnly(io, home, logPath)
-        await io.write(logPath, snapshot)
+        const where = await locate(io)
+        const { text } = await loadEarlier(io)
+        await makeOwnerOnly(io, where)
+        await io.write(where.path, text + lines.join('\n') + '\n')
       })
       .catch(() => undefined)
   }
 
   return {
+    async earlier(io: RecorderIo): Promise<RecordedEvent[]> {
+      return (await loadEarlier(io)).events
+    },
+    async logPath(io: RecorderIo): Promise<string> {
+      return (await locate(io)).path
+    },
     record(io: RecorderIo, event: Omit<RecordedEvent, 'time'>): void {
       append(io, { ...event, time: new Date().toISOString() })
     },

@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { stubMods } from './fake-io.ts'
+import { ruleEvents, stubMods } from './fake-io.ts'
 
 function evaluatorRule(action: 'block' | 'ask') {
   return `---\nevent: file\naction: ${action}\nconditions:\n  - field: file_path\n    operator: contains\n    pattern: migrations/\n  - field: new_text\n    operator: llm_evaluate\n    pattern: Does this change an existing migration?\n---\nAdd a new migration.\n`
@@ -83,7 +83,6 @@ test('the failed check is logged as check-failed for the rule', async ($, on) =>
   const mods = stubWith(on, 'block', async () => undefined)
   await $.tool.call(migrationEdit)
   await new Promise((resolve) => setTimeout(resolve, 0))
-  const text = mods.writes.get('/home/u/.cc-enforcer/logs/session-1.jsonl') ?? ''
-  const lines = text.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  const lines = ruleEvents(mods.writes)
   expect(lines.map((line) => [line.kind, line.ruleId])).toEqual([['check-failed', 'project:migrations']])
 })

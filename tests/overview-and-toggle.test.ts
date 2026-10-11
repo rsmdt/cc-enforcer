@@ -97,10 +97,10 @@ test('a malformed toggle shows the usage and changes nothing', async ($, on) => 
   expect(files[projectRule]).toBe(forcePush())
 })
 
-test('both commands are registered at session start', async ($, on) => {
+test('every command is registered at session start', async ($, on) => {
   const mods = stubMods(on, { files: {}, cwd: '/repo', dirs: ['/repo/.git'] })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo' })
-  expect(mods.commands).toEqual(['cc-enforcer-rules', 'cc-enforcer-toggle'])
+  expect(mods.commands).toEqual(['cc-enforcer-rules', 'cc-enforcer-toggle', 'cc-enforcer-audit', 'cc-enforcer-cleanup'])
 })
 
 test('a session start with Hookify enabled tells the user to disable Hookify', async ($, on) => {

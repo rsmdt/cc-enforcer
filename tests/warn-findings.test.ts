@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { stubMods } from './fake-io.ts'
+import { ruleEvents, stubMods } from './fake-io.ts'
 
 const rmWarning = '---\nname: careful-rm\nevent: bash\naction: warn\npattern: rm -rf\n---\nPrefer moving files to the trash with trash-cli.\n'
 const consoleLog = '---\nevent: file\npattern: console\\.log\\(\n---\nUse the project logger instead of console.log.\n'
@@ -19,8 +19,7 @@ const repo = {
 }
 
 function logLines(writes: Map<string, string>) {
-  const text = writes.get('/home/u/.cc-enforcer/logs/session-1.jsonl') ?? ''
-  return text.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  return ruleEvents(writes, '/repo')
 }
 
 async function settled() {
@@ -36,7 +35,7 @@ test('a matching warn rule lets the call run and Claude reads the finding with i
   expect(mods.toolCalls).toEqual(['Bash'])
 })
 
-test('a warn finding is shown to the user as coming from cc-enforcer and logged without the command', async ($, on) => {
+test('a warn finding is shown to the user as coming from cc-enforcer and logged with the command', async ($, on) => {
   const mods = stubMods(on, repo)
   await $.tool.call({ tool: 'Bash', command: 'rm -rf build' })
   await settled()
@@ -45,7 +44,7 @@ test('a warn finding is shown to the user as coming from cc-enforcer and logged 
   expect(lines.map((line) => [line.kind, line.ruleId, line.ruleName, line.action, line.tool, line.agentLabel])).toEqual([
     ['finding', 'project:careful-rm', 'careful-rm', 'warn', 'Bash', 'main session'],
   ])
-  expect([...mods.writes.values()].join('\n')).not.toContain('rm -rf')
+  expect([...mods.writes.values()].join('\n')).toContain('rm -rf build')
 })
 
 test('a rule with no action line warns, so a written console.log reaches Claude with the result', async ($, on) => {
@@ -57,7 +56,7 @@ test('a rule with no action line warns, so a written console.log reaches Claude 
   expect(logLines(mods.writes).map((line) => [line.kind, line.ruleId, line.target])).toEqual([['finding', 'project:console-log', '/repo/src/a.ts']])
 })
 
-test('a call no warn rule matches gets its result unchanged and nothing is logged', async ($, on) => {
+test('a call no warn rule matches gets its result unchanged and no rule event is logged', async ($, on) => {
   const mods = stubMods(on, repo)
   const result = await $.tool.call({ tool: 'Bash', command: 'ls' })
   expect(result.result).toBe('ran')
