@@ -217,7 +217,7 @@ What the feature collects and keeps, as an obligation: purpose, retention, sensi
 
 | ID | Data item | Purpose | Retention | Classification |
 |----|-----------|---------|-----------|----------------|
-| DR-6 | Local enforcement log: rule hits and findings per session, on the user's machine | Overview counts and the user's own review | Kept on the user's machine; never sent anywhere | Sensitive (may quote code and commands) |
+| DR-6 | Local enforcement log: every enforcement event per session (each tool call with its full input, whether a rule covered it or not; prompts; turn ends; rule hits and findings), on the user's machine | Overview counts, the audit pane restored on resume, and mining ignored calls for new rules | Kept on the user's machine until the user removes it with `/cc-enforcer-cleanup` (default: older than 180 days); never sent anywhere | Sensitive (holds commands, prompts and file content) |
 
 - **User rights:** The local enforcement log stays under the user's control on their machine. Content evaluated by a model goes to the user's own model provider under the user's own plan and terms; cc-enforcer runs no service and keeps nothing elsewhere.
 

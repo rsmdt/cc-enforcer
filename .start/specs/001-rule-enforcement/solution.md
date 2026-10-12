@@ -104,7 +104,7 @@ Context the implementer must read before building. Real paths only; one line on 
   not hold: Hookify does not understand `ask` or `llm_evaluate`, which `CHANGELOG.md` and the drafting
   skill say.
 - **Can modify:** the `enabled` line of a rule file when the user switches a rule (FR-10), rule files the
-  user approves through the drafting skill, its own log in `~/.cc-enforcer/logs/`, its `$.state`, and the
+  user approves through the drafting skill, its own session logs in `~/.cc-enforcer/projects/`, its `$.state`, and the
   prompt box text when the user presses "Send to Claude".
 - **Must not touch:** the user's Claude Code settings (read only, for the Hookify check), other plugins,
   or any file outside the two rule folders and its log folder.
@@ -301,7 +301,7 @@ conditions:                          # all must hold
 | Review queue | Reviewer | `$.state`, per agent | Tool call id, tool, target, and the deferred items Check returned (rule id, question, content); at most 50 entries, further calls counted as "not reviewed"; emptied at that agent's `turn.complete`; `reset()` on `prompt.submit` empties only the main session's queue, reporting its entries as "not reviewed" |
 | Pending findings | Reviewer | `$.state` | Findings shown in the band until sent or dismissed; `reset()` keeps them |
 | Loop counter | Turn guard | `$.state`, per agent and rule id | Consecutive stop blocks; reset by `reset()` on `prompt.submit` or when a stop passes |
-| Event log | Recorder | `~/.cc-enforcer/logs/<session-id>.jsonl`, owner-only where `$.fs` allows (Open questions) | Rule name, outcome, event, tool and target — the file path for file tools, only the tool name for `Bash` and MCP tools; never file content, prompt text, command text or output; kept until the user deletes it (DR-6) |
+| Event log | Recorder | `~/.cc-enforcer/projects/<project-path-with-dashes>/<session-id>.jsonl`, the shape of `~/.claude/projects/`; folders 0700, file 0600 | Every enforcement event: each tool call with its full input, the rules covering and matching it and every status change; each prompt with its text; each turn end; rule hits, findings and rejected rule files. Read back at session start so a resumed session restores the audit pane and hit counts; kept until `/cc-enforcer-cleanup [period]` removes logs older than the period (default 180 days) (DR-6) |
 
 **Entities:**
 
@@ -610,7 +610,7 @@ Patterns: `THE SYSTEM SHALL` (always) · `WHEN [trigger], THE SYSTEM SHALL` (eve
 - [ ] IF the session has no surface, THEN THE SYSTEM SHALL record evaluator findings in the session log only — FR-8 assumption (design limit)
 - [ ] WHEN the user submits a prompt, THE SYSTEM SHALL report the main session's still-queued calls as not reviewed and empty that queue — AC-8.2 (design limit)
 - [ ] WHEN the user submits a prompt, THE SYSTEM SHALL reset the stop loop counters — AC-21.5 (design limit)
-- [ ] THE SYSTEM SHALL record each rule hit and finding in a local per-session log that holds no file content, prompt text or command text and is sent nowhere — DR-6
+- [ ] THE SYSTEM SHALL record every enforcement event, with each call's full input, in a local per-session log that is sent nowhere, restore the audit pane from it when the session resumes, and delete logs older than a period the user names only through `/cc-enforcer-cleanup` — DR-6
 - [ ] IF a turn queues more than 50 calls for review, THEN THE SYSTEM SHALL review the first 50 and report the rest to the user as not reviewed — FR-8 assumption (review cap)
 - [ ] THE SYSTEM SHALL label every message and finding with cc-enforcer and the rule's name and never deliver it as the user's words — AC-8.3
 

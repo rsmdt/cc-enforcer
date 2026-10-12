@@ -55,6 +55,11 @@ If rules stop applying, Claude Code may have switched mods off for this session.
 
 ## Event log
 
-Each rule hit is written to `~/.cc-enforcer/logs/<session-id>.jsonl` (owner-only). The log holds rule
-names, outcomes, events, tools and file paths, never file content, prompt text or command text, and is
-sent nowhere.
+Every enforcement event is written to `~/.cc-enforcer/projects/<project-path>/<session-id>.jsonl`
+(owner-only), the same shape as `~/.claude/projects/`. The log holds each tool call with its full input,
+including calls no rule covers, every prompt, every turn end, and each rule hit and finding. It is sent
+nowhere. A resumed session reads it back, so the audit pane keeps its history.
+
+The log keeps commands, prompts and file content, which can include secrets. Remove old logs with
+`/cc-enforcer-cleanup [period]`, for example `/cc-enforcer-cleanup last week`; without a period it removes
+logs older than 180 days.
